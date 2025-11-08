@@ -1,0 +1,33 @@
+{
+  "name": "mcp-demo",
+  "version": "1.0.0",
+  "description": "Model Context Protocol Demo with AWS Bedrock",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && node dist/host.js",
+    "dev": "npm run servers",
+    "servers": "concurrently \"npm run server:ec2\" \"npm run server:s3\" \"npm run server:file\"",
+    "host": "ts-node host.ts",
+    "server:ec2": "PORT=3001 ts-node servers/aws-ec2-server/server.ts",
+    "server:s3": "PORT=3002 ts-node servers/aws-s3-server/server.ts",
+    "server:file": "PORT=3003 ts-node servers/file-server/server.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.926.0",
+    "@aws-sdk/client-ec2": "^3.922.0",
+    "@aws-sdk/client-s3": "^3.922.0",
+    "@cfworker/json-schema": "^4.1.1",
+    "@modelcontextprotocol/sdk": "^1.21.0",
+    "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
+    "express": "^5.1.0",
+    "readline": "^1.3.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.5",
+    "@types/node": "^24.9.2",
+    "concurrently": "^9.2.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.0.0"
+  }
+}
