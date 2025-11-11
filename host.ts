@@ -69,18 +69,17 @@ S3 Tools: ${capabilities.s3.join(', ')}
 File Tools: ${capabilities.file.join(', ')}
 
 User request: "${prompt}".
-Only extratc the tools necessary. Give the answer to the user question even if not in MCP tools.
 
-Analyze the request and respond with which tools to use:
-- If user wants EC2 data: include "USE_EC2"
-- If user wants S3 data: include "USE_S3"  
-- If user wants to create S3 bucket: include "CREATE_S3" also pass the name-random_string mentioned by user with required format output:test-hbadh87hu
-- If user wants to put object/data to bucket: include: "PutObjectInS3" aslo ask the name of file and bucket name. These are required
-- If user wants Excel/file output: include "USE_EXCEL"
-- For "list ec2 and save to excel" respond: "USE_EC2 USE_EXCEL"
-- For "write in excel" without specifying data, respond: "USE_EC2 USE_EXCEL"
-
-Respond with space-separated tool names only.`;
+Your task:
+- When the request requires using any of the above MCP tools, respond with ONLY the space-separated tool names that are needed (no explanations). Use these conventions:
+  - If user wants EC2 data: include "USE_EC2"
+  - If user wants S3 data: include "USE_S3"
+  - If user wants to create S3 bucket: include "CREATE_S3" and also pass the name-random_string mentioned by user with required format output:test-hbadh87hu
+  - If user wants to put object/data to bucket: include "PutObjectInS3" and ask for the file name and bucket name if missing (these are required)
+  - If user wants Excel/file output: include "USE_EXCEL"
+  - For "list ec2 and save to excel" respond: "USE_EC2 USE_EXCEL"
+  - For "write in excel" without specifying data, respond: "USE_EC2 USE_EXCEL"
+- Otherwise, if the request is unrelated to these tools or can be answered directly, provide a concise, helpful answer to the user's question in natural language. Do not include any tool names in this case.`;
 
             const command = new InvokeModelCommand({
                 modelId: "us.anthropic.claude-3-haiku-20240307-v1:0",
