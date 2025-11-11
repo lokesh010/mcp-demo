@@ -74,7 +74,7 @@ Your task:
 - When the request requires using any of the above MCP tools, respond with ONLY the space-separated tool names that are needed (no explanations). Use these conventions:
   - If user wants EC2 data: include "USE_EC2"
   - If user wants S3 data: include "USE_S3"
-  - If user wants to create S3 bucket: include "CREATE_S3" and also pass the name-random_string mentioned by user with required format output:test-hbadh87hu
+  - If user wants to create S3 bucket: include "CREATE_S3" and also pass the name if provided by the user
   - If user wants to put object/data to bucket: include "PutObjectInS3" and ask for the file name and bucket name if missing (these are required)
   - If user wants Excel/file output: include "USE_EXCEL"
   - For "list ec2 and save to excel" respond: "USE_EC2 USE_EXCEL"
@@ -122,10 +122,35 @@ Your task:
             }
 
             if (llmResponse.includes('CREATE_S3')) {
-                console.log('🗄️ Executing S3 tool create bucket...');                
+                console.log('🗄️ Executing S3 tool create bucket...');
                 const tokens = llmResponse.trim().split(/\s+/);
-                const bucketName = tokens[tokens.length - 1];
-                
+                let bucketName = tokens[tokens.length - 1];
+
+                // Helper: extract a likely bucket name from the user's own prompt
+                const stopwords = new Set(['create','bucket','buckets','s3','a','an','the','please']);
+                const userCandidates = (userPrompt.match(/\b[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])\b/g) || []).filter(w => !stopwords.has(w));
+                const bucketPattern = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/;
+                const userProvidedBucket = userCandidates.find(w => bucketPattern.test(w));
+
+                // Prefer name explicitly provided by the user
+                if (userProvidedBucket) {
+                    bucketName = userProvidedBucket;
+                }
+
+                // Detect if bucket name is missing, not valid, or still a directive
+                const isDirective = !bucketName || bucketName === 'CREATE_S3' || bucketName.startsWith('USE_') || bucketName === 'PutObjectInS3' || !bucketPattern.test(bucketName);
+
+                // If the user did not specify a bucket name in their prompt, force prompt even if LLM suggested one
+                const userDidNotProvideName = !userProvidedBucket;
+                if (isDirective || userDidNotProvideName) {
+                    const answer = await this.rl.question('Amazon Q: Please provide a unique S3 bucket name (e.g., my-bucket-1234): ');
+                    if (!answer || !answer.trim()) {
+                        results.error = 'Bucket name is required to create a bucket.';
+                        return results;
+                    }
+                    bucketName = answer.trim();
+                }
+
                 const s3Result = await this.s3Client.createBucket(bucketName, 'ap-southeast-1');
                 const content = s3Result.content as Array<{ type: string; text: string }>;
                 results.createBucketMessage = content[0].text;
@@ -141,16 +166,88 @@ Your task:
                 
                 const excelResult = await this.fileClient.writeExcel(
                     filename, 
-                    dataToExcel, // Pass object directly, not stringi`fied
+                    dataToExcel, // Pass object directly, not stringified
                     results.ec2 ? 'EC2 Instances' : 'S3 Buckets'
                 );
                 const excelContent = excelResult.content as Array<{ type: string; text: string }>;
-                results.excel = excelContent[0].text;
+                try {
+                    const excelObj = JSON.parse(excelContent[0].text);
+                    results.excelData = excelObj; // { filePath, base64 }
+                    results.excel = `Excel file created: ${excelObj.filePath}`;
+                } catch {
+                    results.excel = excelContent[0].text;
+                }
             } else {
                 console.log('🔍 DEBUG - Excel condition NOT met');
                 console.log('USE_EXCEL found:', llmResponse.includes('USE_EXCEL'));
                 console.log('EC2 data exists:', !!results.ec2);
                 console.log('S3 data exists:', !!results.s3);
+            }
+            
+            // If instruction includes uploading to S3, handle bucket/key prompts and upload
+            if (llmResponse.includes('PutObjectInS3')) {
+                // Ensure we have an Excel to upload; if not, try to create from available data
+                if (!results.excelData && (results.ec2 || results.s3)) {
+                    const dataToExcel = results.ec2 || results.s3;
+                    const filename = results.ec2 ? 'ec2-instances' : 's3-buckets';
+                    const excelResult = await this.fileClient.writeExcel(
+                        filename,
+                        dataToExcel,
+                        results.ec2 ? 'EC2 Instances' : 'S3 Buckets'
+                    );
+                    const excelContent = excelResult.content as Array<{ type: string; text: string }>;
+                    try {
+                        const excelObj = JSON.parse(excelContent[0].text);
+                        results.excelData = excelObj;
+                        results.excel = `Excel file created: ${excelObj.filePath}`;
+                    } catch {}
+                }
+
+                if (!results.excelData) {
+                    results.error = 'No Excel data available to upload. Please include USE_EXCEL to generate the file first.';
+                    return results;
+                }
+
+                // Try to detect a bucket name from the user's prompt
+                const bucketPattern = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/;
+                const tokens = (userPrompt.match(/\b[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])\b/g) || []);
+                let candidateBucket = tokens.find(t => bucketPattern.test(t));
+
+                // Fetch available buckets
+                const s3ListResult = await this.s3Client.getBuckets();
+                const s3ListContent = s3ListResult.content as Array<{ type: string; text: string }>;
+                let bucketList: string[] = [];
+                try {
+                    const parsed = JSON.parse(s3ListContent[0].text);
+                    bucketList = (parsed.buckets || []).map((b: any) => b.name);
+                } catch {}
+
+                // Validate/ask for bucket
+                let bucketName = candidateBucket || '';
+                while (!bucketName || !bucketList.includes(bucketName)) {
+                    const listMsg = bucketList.length ? `Available buckets: ${bucketList.join(', ')}` : 'No buckets found.';
+                    const promptMsg = bucketList.length
+                        ? `Amazon Q: Enter a valid bucket name from the list above: `
+                        : `Amazon Q: No buckets found. Please create one first or enter a valid existing bucket name: `;
+                    console.log(listMsg);
+                    const answer = await this.rl.question(promptMsg);
+                    bucketName = (answer || '').trim();
+                    // Re-fetch list in case user created new bucket elsewhere
+                    const refreshed = await this.s3Client.getBuckets();
+                    try {
+                        const parsedRef = JSON.parse((refreshed.content as Array<{ type: string; text: string }>)[0].text);
+                        bucketList = (parsedRef.buckets || []).map((b: any) => b.name);
+                    } catch {}
+                }
+
+                // Determine key name from file path
+                const filePath = results.excelData.filePath as string;
+                const key = filePath.split('/').pop() || 'output.xlsx';
+
+                console.log(`🗄️ Uploading ${key} to bucket ${bucketName}...`);
+                const putResult = await this.s3Client.putObject(bucketName, key, results.excelData.base64);
+                const putContent = putResult.content as Array<{ type: string; text: string }>;
+                results.s3PutMessage = putContent[0].text;
             }
             
             return results;
@@ -179,6 +276,9 @@ Your task:
         
         if (results.excel) {
             response += `\n📊 ${results.excel}\n`;
+        }
+        if (results.s3PutMessage) {
+            response += `\n📤 ${results.s3PutMessage}\n`;
         }
         
         if (results.createBucketMessage) {

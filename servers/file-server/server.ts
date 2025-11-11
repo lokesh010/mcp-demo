@@ -93,12 +93,18 @@ server.registerTool(
             }
 
             const filePath = path.join(outputDir, filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`);
+            // Write to disk
             await workbook.xlsx.writeFile(filePath);
+
+            // Also get Buffer to return base64 for uploads
+            const raw = await workbook.xlsx.writeBuffer();
+            const buffer: Buffer = Buffer.isBuffer(raw) ? raw as Buffer : Buffer.from(raw as ArrayBuffer);
+            const base64 = buffer.toString('base64');
 
             return { 
                 content: [{ 
                     type: 'text', 
-                    text: `Excel file created successfully: ${filePath}` 
+                    text: JSON.stringify({ filePath, base64 }) 
                 }] 
             };
         } catch (error) {

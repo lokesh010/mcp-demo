@@ -38,10 +38,10 @@ export class S3Client {
         return result;
     }
 
-    async putObject(bucketName: string, key: string, content: string) {
+    async putObject(bucketName: string, key: string, contentBase64: string) {
         const result = await this.client.callTool({ 
             name: 'PutDataInS3', 
-            arguments: { bucketName, key, content } 
+            arguments: { bucketName, key, contentBase64 } 
         });
         return result;
     }

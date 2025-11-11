@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import * as express from 'express';
-import { S3Client, ListBucketsCommand, ListObjectsV2Command, CreateBucketCommand, PutBucketAclCommand, PutObjectAclCommand } from "@aws-sdk/client-s3";
+import { S3Client, ListBucketsCommand, ListObjectsV2Command, CreateBucketCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import dotenv from 'dotenv';
 import z from 'zod';
 
@@ -58,7 +58,7 @@ server.registerTool('PutDataInS3', {
     inputSchema: {
         bucketName: z.string(),
         key: z.string(),
-        content: z.string()
+        contentBase64: z.string()
     }
 }, async (args: any) => {
     const client = new S3Client({
@@ -70,25 +70,25 @@ server.registerTool('PutDataInS3', {
     });
 
     try {
-        const command = new PutObjectAclCommand({
+        const body = Buffer.from(args.contentBase64, 'base64');
+        const command = new PutObjectCommand({
             Bucket: args.bucketName,
-            ACL: 'public-read',
-            Key:args.key,
-            ContentMD5: args.content
-
-        })
-        await client.send(command)
+            Key: args.key,
+            Body: body,
+            ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+        await client.send(command);
         return { 
             content: [{ 
                 type: 'text', 
-                text: `Data successfuly put in bucket ${args.bucketName}` 
+                text: `Object '${args.key}' uploaded to bucket '${args.bucketName}' successfully.` 
             }] 
         };
     } catch (error) {
         return { 
             content: [{ 
                 type: 'text', 
-                text: `Error pouting data to bucket: ${error}` 
+                text: `Error uploading object to bucket: ${error}` 
             }] 
         };
     }
